@@ -1,0 +1,26 @@
+# General
+.DS_Store
+Thumbs.db
+
+# User specific requested
+README_CN.md
+readme.cn
+prompt.md
+prompr
+
+# Python / Backend
+__pycache__/
+*.py[cod]
+*$py.class
+.venv
+.env
+*.env
+
+# Node / Frontend
+node_modules/
+dist/
+build/
+npm-debug.log
+yarn-error.log
+.docusaurus/
+.npm/
