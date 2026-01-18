@@ -13,3 +13,8 @@ class TaskStatusResponse(BaseModel):
     current: int | None = None
     total: int | None = None
     message: str | None = None
+
+
+class TaskCancelResponse(BaseModel):
+    task_id: str
+    message: str

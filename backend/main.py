@@ -3,15 +3,24 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import uuid4
 
+import redis.asyncio as redis
 from celery.result import AsyncResult
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from config import settings
 from database import get_session, init_db
 from models import DataRecord
-from schemas import TaskStatusResponse, UploadResponse
+from schemas import TaskStatusResponse, UploadResponse, TaskCancelResponse
 from worker import process_csv
 from celery_app import celery_app
 
@@ -98,6 +107,34 @@ async def status(task_id: str) -> TaskStatusResponse:
         total=meta.get("total"),
         message=meta.get("message"),
     )
+
+
+@app.post("/tasks/{task_id}/cancel", response_model=TaskCancelResponse)
+def cancel_task(task_id: str) -> TaskCancelResponse:
+    """Send a revoke signal to the celery task."""
+    celery_app.control.revoke(task_id, terminate=True)
+    return TaskCancelResponse(task_id=task_id, message="task cancel signal sent")
+
+
+@app.websocket("/ws/status/{task_id}")
+async def websocket_status(websocket: WebSocket, task_id: str):
+    await websocket.accept()
+    # Create a new Redis connection for subscription
+    r = redis.from_url(settings.celery_broker_url)
+    pubsub = r.pubsub()
+    await pubsub.subscribe(f"task_progress:{task_id}")
+
+    try:
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                # Redis message data is bytes, decode it
+                data = message["data"].decode("utf-8")
+                await websocket.send_text(data)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await pubsub.unsubscribe()
+        await r.close()
 
 
 @app.get("/export")

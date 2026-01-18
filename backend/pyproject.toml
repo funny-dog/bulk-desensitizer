@@ -14,4 +14,12 @@ dependencies = [
     "redis>=7.1.0",
     "sqlalchemy>=2.0.45",
     "uvicorn>=0.40.0",
+    "websockets>=16.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.0.2",
+    "requests-mock>=1.12.1",
 ]

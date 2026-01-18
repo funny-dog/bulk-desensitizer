@@ -53,9 +53,18 @@
           </div>
           <div class="status-actions">
             <p v-if="taskId" class="task-id">{{ taskId }}</p>
-            <button v-if="status.state === 'SUCCESS'" @click="downloadResults" class="download-btn">
-              Download CSV
-            </button>
+            <div class="button-group">
+              <button
+                v-if="['PENDING', 'PROGRESS'].includes(status.state)"
+                @click="cancelTask"
+                class="cancel-btn"
+              >
+                Cancel
+              </button>
+              <button v-if="status.state === 'SUCCESS'" @click="downloadResults" class="download-btn">
+                Download CSV
+              </button>
+            </div>
           </div>
         </div>
 
@@ -92,7 +101,7 @@ const status = ref({
   message: ''
 })
 
-let poller = null
+const socket = ref(null)
 
 const progress = computed(() => {
   if (!status.value.total) {
@@ -149,7 +158,7 @@ const uploadFile = async () => {
       message: 'queued'
     }
 
-    startPolling()
+    connectWebSocket()
   } catch (error) {
     errorMessage.value = error?.message || 'Unexpected error'
   } finally {
@@ -157,42 +166,46 @@ const uploadFile = async () => {
   }
 }
 
-const fetchStatus = async () => {
-  if (!taskId.value) return
+const connectWebSocket = () => {
+  if (socket.value) {
+    socket.value.close()
+  }
 
-  try {
-    const response = await fetch(`${apiBase}/status/${taskId.value}`)
-    if (!response.ok) {
-      throw new Error('Status check failed')
-    }
+  const wsBase = apiBase.replace(/^http/, 'ws')
+  socket.value = new WebSocket(`${wsBase}/ws/status/${taskId.value}`)
 
-    const data = await response.json()
-    status.value = {
-      state: data.state,
-      current: data.current || 0,
-      total: data.total || 0,
-      message: data.message || ''
-    }
+  socket.value.onopen = () => {
+    console.log('WS Connected')
+  }
 
-    if (data.state === 'SUCCESS' || data.state === 'FAILURE') {
-      stopPolling()
+  socket.value.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data)
+      status.value.current = data.current
+      status.value.total = data.total
+      status.value.message = data.message
+
+      if (data.message === 'completed') {
+        status.value.state = 'SUCCESS'
+        socket.value.close()
+      } else {
+        status.value.state = 'PROGRESS'
+      }
+    } catch (e) {
+      console.error('WS parse error', e)
     }
-  } catch (error) {
-    errorMessage.value = error?.message || 'Status update failed'
-    stopPolling()
   }
 }
 
-const startPolling = () => {
-  stopPolling()
-  fetchStatus()
-  poller = window.setInterval(fetchStatus, 2000)
-}
-
-const stopPolling = () => {
-  if (poller) {
-    clearInterval(poller)
-    poller = null
+const cancelTask = async () => {
+  if (!taskId.value) return
+  try {
+    await fetch(`${apiBase}/tasks/${taskId.value}/cancel`, { method: 'POST' })
+    status.value.state = 'REVOKED'
+    status.value.message = 'Cancelled by user'
+    if (socket.value) socket.value.close()
+  } catch (e) {
+    errorMessage.value = 'Failed to cancel task'
   }
 }
 
@@ -201,7 +214,7 @@ const downloadResults = () => {
 }
 
 onBeforeUnmount(() => {
-  stopPolling()
+  if (socket.value) socket.value.close()
 })
 </script>
 
@@ -222,6 +235,28 @@ onBeforeUnmount(() => {
   background: var(--accent-1);
   color: white;
   border-color: var(--accent-1);
+}
+
+.cancel-btn {
+  background: white;
+  border: 1px solid #ef4444;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  font-weight: 600;
+  color: #ef4444;
+  transition: all 0.2s;
+}
+
+.cancel-btn:hover {
+  background: #ef4444;
+  color: white;
+}
+
+.button-group {
+  display: flex;
+  gap: 8px;
 }
 
 .status-actions {

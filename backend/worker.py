@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 
+import redis
 from celery import Task
 from openpyxl import load_workbook
 
 from celery_app import celery_app
+from config import settings
 from database import SessionLocal, init_db
 from models import DataRecord
+
+# Initialize Redis client for Pub/Sub
+redis_client = redis.from_url(settings.celery_broker_url)
 
 
 def _iter_csv_rows(path: Path):
@@ -86,9 +92,26 @@ def process_csv(self: Task, file_path: str) -> dict:
                         "message": f"Processing row {index}/{total}",
                     },
                 )
+                # Publish progress to Redis
+                redis_client.publish(
+                    f"task_progress:{self.request.id}",
+                    json.dumps(
+                        {
+                            "current": index,
+                            "total": total,
+                            "message": f"Processing row {index}/{total}",
+                        }
+                    ),
+                )
 
         session.commit()
     finally:
         session.close()
+
+    # Publish completion message
+    redis_client.publish(
+        f"task_progress:{self.request.id}",
+        json.dumps({"current": total, "total": total, "message": "completed"}),
+    )
 
     return {"current": total, "total": total, "message": "completed"}
