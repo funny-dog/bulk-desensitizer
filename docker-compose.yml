@@ -23,8 +23,10 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       UPLOAD_DIR: /data/uploads
+      OUTPUT_DIR: /data/outputs
     volumes:
       - uploads:/data/uploads
+      - outputs:/data/outputs
     ports:
       - "8000:8000"
     depends_on:
@@ -40,8 +42,10 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       UPLOAD_DIR: /data/uploads
+      OUTPUT_DIR: /data/outputs
     volumes:
       - uploads:/data/uploads
+      - outputs:/data/outputs
     depends_on:
       - db
       - redis
@@ -64,3 +68,4 @@ services:
 volumes:
   db-data:
   uploads:
+  outputs:

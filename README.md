@@ -17,14 +17,32 @@ Then open:
 - API docs: http://localhost:8000/docs
 
 ## How It Works
-1. Upload a CSV or XLSX via `POST /upload`
+1. Upload a CSV or XLSX via `POST /upload/desensitize`
 2. FastAPI saves the file and triggers a Celery task (non-blocking)
-3. Celery parses rows, stores dummy records to Postgres, and reports progress
+3. Celery desensitizes sensitive columns and writes a new output file
 4. Frontend polls `GET /status/{task_id}` every 2 seconds and updates the progress bar
+5. Download the result via `GET /download/{task_id}`
 
 ## API
-- `POST /upload` (multipart form-data, field: `file`)
+- `POST /upload/desensitize` (multipart form-data, field: `file`)
 - `GET /status/{task_id}`
+- `GET /download/{task_id}`
+
+## Desensitization Rules
+The worker applies masking based on header keywords (case-insensitive):
+- Email: `email`, `e-mail`, `mail`, `邮箱`
+- Phone: `phone`, `mobile`, `tel`, `telephone`, `手机号`, `电话`
+- ID: `id_card`, `idcard`, `identity`, `ssn`, `passport`, `身份证`, `证件`
+- Name: `name`, `full_name`, `first_name`, `last_name`, `姓名`
+- Address: `address`, `addr`, `地址`
+
+If a column does not match any keyword, it is left unchanged.
+
+## Frontend Usage
+1. Open the frontend at http://localhost:5173
+2. Upload a CSV/XLSX file with sensitive columns
+3. Wait for the progress bar to reach 100%
+4. Click "Download" to save the desensitized file
 
 ## Sample Data
 A sample Excel file is provided at `sample_data.xlsx`.

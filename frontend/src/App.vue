@@ -2,11 +2,11 @@
   <div class="page">
     <header class="hero">
       <div class="hero-text">
-        <p class="eyebrow">Bulk Data Processor</p>
-        <h1>Async CSV/XLSX pipeline, real-time feedback.</h1>
+        <p class="eyebrow">Desensitization Tool</p>
+        <h1>Upload CSV/XLSX, download desensitized results.</h1>
         <p class="lead">
-          Upload a large CSV and let FastAPI + Celery handle the heavy lifting while you
-          watch progress tick upward.
+          Mask sensitive columns (email, phone, ID, name, address) based on header keywords,
+          then download the processed file once the task completes.
         </p>
       </div>
       <div class="hero-card">
@@ -16,7 +16,7 @@
         </div>
         <div>
           <p class="hero-label">Mode</p>
-          <p class="hero-value">Non-blocking upload + async worker</p>
+          <p class="hero-value">Non-blocking upload + async desensitize</p>
         </div>
         <div>
           <p class="hero-label">Cadence</p>
@@ -41,7 +41,7 @@
           <p v-else class="file-hint">Drop a CSV/XLSX here or click to select.</p>
         </div>
         <button class="primary" :disabled="!selectedFile || uploading" @click="uploadFile">
-          {{ uploading ? 'Uploading...' : 'Upload & process' }}
+          {{ uploading ? 'Uploading...' : 'Upload & desensitize' }}
         </button>
       </div>
 
@@ -62,7 +62,7 @@
                 Cancel
               </button>
               <button v-if="status.state === 'SUCCESS'" @click="downloadResults" class="download-btn">
-                Download CSV
+                Download result
               </button>
             </div>
           </div>
@@ -79,6 +79,45 @@
         </div>
 
         <p v-if="errorMessage" class="error">{{ errorMessage }}</p>
+      </div>
+
+      <div class="panel-card rules-card">
+        <p class="panel-title">Keyword Detection Rules</p>
+        <p class="rules-desc">
+          Columns matching these keywords (case-insensitive) will be automatically masked.
+        </p>
+        <div class="rules-grid">
+          <div class="rule-item">
+            <span class="rule-label">Email</span>
+            <div class="rule-tags">
+              <span>email</span><span>e-mail</span><span>mail</span><span>邮箱</span>
+            </div>
+          </div>
+          <div class="rule-item">
+            <span class="rule-label">Phone</span>
+            <div class="rule-tags">
+              <span>phone</span><span>mobile</span><span>tel</span><span>telephone</span><span>手机号</span><span>电话</span>
+            </div>
+          </div>
+          <div class="rule-item">
+            <span class="rule-label">Identity</span>
+            <div class="rule-tags">
+              <span>id_card</span><span>idcard</span><span>ssn</span><span>passport</span><span>identity</span><span>身份证</span><span>证件</span>
+            </div>
+          </div>
+          <div class="rule-item">
+            <span class="rule-label">Name</span>
+            <div class="rule-tags">
+              <span>name</span><span>full_name</span><span>first_name</span><span>last_name</span><span>姓名</span>
+            </div>
+          </div>
+          <div class="rule-item">
+            <span class="rule-label">Address</span>
+            <div class="rule-tags">
+              <span>address</span><span>addr</span><span>地址</span>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   </div>
@@ -139,7 +178,7 @@ const uploadFile = async () => {
     const formData = new FormData()
     formData.append('file', selectedFile.value)
 
-    const response = await fetch(`${apiBase}/upload`, {
+    const response = await fetch(`${apiBase}/upload/desensitize`, {
       method: 'POST',
       body: formData
     })
@@ -210,7 +249,7 @@ const cancelTask = async () => {
 }
 
 const downloadResults = () => {
-  window.location.href = `${apiBase}/export?task_id=${taskId.value}`
+  window.location.href = `${apiBase}/download/${taskId.value}`
 }
 
 onBeforeUnmount(() => {
@@ -481,5 +520,55 @@ onBeforeUnmount(() => {
   .panel {
     grid-template-columns: 1fr;
   }
+}
+
+.rules-card {
+  grid-column: 1 / -1;
+  gap: 20px;
+}
+
+.rules-desc {
+  margin: -8px 0 0;
+  color: var(--ink-2);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.rules-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 24px 32px;
+  padding-top: 8px;
+  border-top: 1px solid var(--stroke);
+}
+
+.rule-item {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rule-label {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  color: var(--accent-1);
+}
+
+.rule-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rule-tags span {
+  font-size: 0.85rem;
+  padding: 4px 10px;
+  background: var(--bg-2);
+  border: 1px solid rgba(31, 42, 48, 0.06);
+  border-radius: 6px;
+  color: var(--ink-1);
+  font-family: 'Space Grotesk', monospace;
 }
 </style>

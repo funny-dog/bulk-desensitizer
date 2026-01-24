@@ -13,6 +13,7 @@ class TaskStatusResponse(BaseModel):
     current: int | None = None
     total: int | None = None
     message: str | None = None
+    output_file: str | None = None
 
 
 class TaskCancelResponse(BaseModel):

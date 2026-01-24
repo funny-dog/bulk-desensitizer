@@ -6,12 +6,10 @@ ENV NODE_OPTIONS=--dns-result-order=ipv4first
 
 COPY package*.json ./
 COPY .npmrc ./
-# Copy local node_modules instead of installing (network bypass)
-COPY node_modules ./node_modules
-# RUN npm config set registry http://registry.npmmirror.com
-# RUN npm config set strict-ssl false
-# RUN npm config set fetch-retry-maxtimeout 60000
-# RUN npm install --no-audit --no-fund --verbose
+RUN npm config set registry http://registry.npmmirror.com
+RUN npm config set strict-ssl false
+RUN npm config set fetch-retry-maxtimeout 60000
+RUN npm install --no-audit --no-fund
 
 COPY . .
 

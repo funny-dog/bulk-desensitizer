@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://redis:6379/0"
     celery_result_backend: str = "redis://redis:6379/1"
     upload_dir: str = "/data/uploads"
+    output_dir: str = "/data/outputs"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

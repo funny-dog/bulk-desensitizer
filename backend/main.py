@@ -14,6 +14,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -21,7 +22,7 @@ from config import settings
 from database import get_session, init_db
 from models import DataRecord
 from schemas import TaskStatusResponse, UploadResponse, TaskCancelResponse
-from worker import process_csv
+from worker import process_csv, process_desensitize
 from celery_app import celery_app
 
 app = FastAPI(title="Bulk Data Processor")
@@ -38,6 +39,7 @@ app.add_middleware(
 def on_startup() -> None:
     init_db()
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
+    Path(settings.output_dir).mkdir(parents=True, exist_ok=True)
 
 
 @app.post("/upload", response_model=UploadResponse)
@@ -61,6 +63,30 @@ async def upload(file: UploadFile = File(...)) -> UploadResponse:
             buffer.write(chunk)
 
     task = process_csv.delay(str(destination))
+    return UploadResponse(task_id=task.id)
+
+
+@app.post("/upload/desensitize", response_model=UploadResponse)
+async def upload_desensitize(file: UploadFile = File(...)) -> UploadResponse:
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="missing filename")
+
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in {".csv", ".xlsx"}:
+        raise HTTPException(status_code=400, detail="only .csv or .xlsx is supported")
+
+    upload_dir = Path(settings.upload_dir)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    destination = upload_dir / f"{uuid4().hex}_{file.filename}"
+
+    with destination.open("wb") as buffer:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            buffer.write(chunk)
+
+    task = process_desensitize.delay(str(destination))
     return UploadResponse(task_id=task.id)
 
 
@@ -90,6 +116,7 @@ async def status(task_id: str) -> TaskStatusResponse:
             current=meta.get("current"),
             total=meta.get("total"),
             message=meta.get("message"),
+            output_file=meta.get("output_file"),
         )
 
     if state == "FAILURE":
@@ -172,3 +199,15 @@ def export_data(task_id: str | None = None, db: Session = Depends(get_session)):
     response = StreamingResponse(iter_csv(records), media_type="text/csv")
     response.headers["Content-Disposition"] = f"attachment; filename={filename}"
     return response
+
+
+@app.get("/download/{task_id}")
+def download_result(task_id: str):
+    output_dir = Path(settings.output_dir)
+    candidates = list(output_dir.glob(f"{task_id}_desensitized.*"))
+    if not candidates:
+        raise HTTPException(status_code=404, detail="output file not ready")
+
+    file_path = candidates[0]
+    media_type = "text/csv" if file_path.suffix.lower() == ".csv" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return FileResponse(path=file_path, filename=file_path.name, media_type=media_type)
