@@ -25,7 +25,7 @@ from schemas import TaskStatusResponse, UploadResponse, TaskCancelResponse
 from worker import process_csv, process_desensitize
 from celery_app import celery_app
 
-app = FastAPI(title="Bulk Data Processor")
+app = FastAPI(title="Bulk Desensitizer")
 
 app.add_middleware(
     CORSMiddleware,

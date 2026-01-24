@@ -1,6 +1,6 @@
-# Bulk Data Processor POC
+# Bulk Desensitizer
 
-A full-stack demo showcasing a high-performance async architecture for bulk CSV/XLSX processing.
+A full-stack demo showcasing a high-performance async architecture for CSV/XLSX desensitization.
 
 ## Tech Stack
 - Backend: Python 3.11, FastAPI, Celery, Redis, SQLAlchemy (PostgreSQL)

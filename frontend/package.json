@@ -1,5 +1,5 @@
 {
-  "name": "bulk-data-processor-frontend",
+  "name": "bulk-desensitizer-frontend",
   "private": true,
   "version": "0.0.0",
   "type": "module",

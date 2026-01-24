@@ -16,6 +16,7 @@ services:
       - "6379:6379"
 
   backend:
+    image: bulk-desensitizer-backend
     build:
       context: ./backend
     environment:
@@ -34,6 +35,7 @@ services:
       - redis
 
   worker:
+    image: bulk-desensitizer-worker
     build:
       context: ./backend
     command: uv run celery -A worker.celery_app worker --loglevel=info
@@ -51,6 +53,7 @@ services:
       - redis
 
   frontend:
+    image: bulk-desensitizer-frontend
     build:
       context: ./frontend
       args:
