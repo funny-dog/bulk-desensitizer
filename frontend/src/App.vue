@@ -172,7 +172,8 @@
 <script setup>
 import { computed, onBeforeUnmount, ref } from 'vue'
 
-const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const configuredApiBase = (import.meta.env.VITE_API_BASE_URL || '').trim()
+const apiBase = configuredApiBase ? configuredApiBase.replace(/\/+$/, '') : ''
 
 const selectedFile = ref(null)
 const fileName = ref('')
@@ -188,6 +189,29 @@ const status = ref({
 })
 
 const socket = ref(null)
+
+const buildApiUrl = (path) => {
+  return apiBase ? `${apiBase}${path}` : path
+}
+
+const buildWsUrl = (path) => {
+  if (apiBase) {
+    const wsBase = apiBase.replace(/^http/i, 'ws')
+    return `${wsBase}${path}`
+  }
+
+  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+  return `${protocol}://${window.location.host}${path}`
+}
+
+const normalizeErrorMessage = (error) => {
+  const message = error?.message || ''
+  if (!message) return '发生未知错误'
+  if (/failed to fetch/i.test(message)) {
+    return '网络请求失败，请检查服务地址或网络连接。'
+  }
+  return message
+}
 
 const fileAccept = computed(() => {
   if (mode.value === 'split') {
@@ -285,7 +309,7 @@ const uploadFile = async () => {
     formData.append('file', selectedFile.value)
     const endpoint = mode.value === 'split' ? '/upload/split' : '/upload/desensitize'
 
-    const response = await fetch(`${apiBase}${endpoint}`, {
+    const response = await fetch(buildApiUrl(endpoint), {
       method: 'POST',
       body: formData
     })
@@ -306,7 +330,7 @@ const uploadFile = async () => {
 
     connectWebSocket()
   } catch (error) {
-    errorMessage.value = error?.message || '发生未知错误'
+    errorMessage.value = normalizeErrorMessage(error)
   } finally {
     uploading.value = false
   }
@@ -317,8 +341,7 @@ const connectWebSocket = () => {
     socket.value.close()
   }
 
-  const wsBase = apiBase.replace(/^http/, 'ws')
-  socket.value = new WebSocket(`${wsBase}/ws/status/${taskId.value}`)
+  socket.value = new WebSocket(buildWsUrl(`/ws/status/${taskId.value}`))
 
   socket.value.onopen = () => {
     console.log('WS Connected')
@@ -346,17 +369,17 @@ const connectWebSocket = () => {
 const cancelTask = async () => {
   if (!taskId.value) return
   try {
-    await fetch(`${apiBase}/tasks/${taskId.value}/cancel`, { method: 'POST' })
+    await fetch(buildApiUrl(`/tasks/${taskId.value}/cancel`), { method: 'POST' })
     status.value.state = 'REVOKED'
     status.value.message = '已取消'
     if (socket.value) socket.value.close()
   } catch (e) {
-    errorMessage.value = '取消任务失败'
+    errorMessage.value = normalizeErrorMessage(e)
   }
 }
 
 const downloadResults = () => {
-  window.location.href = `${apiBase}/download/${taskId.value}`
+  window.location.href = buildApiUrl(`/download/${taskId.value}`)
 }
 
 onBeforeUnmount(() => {
