@@ -102,7 +102,11 @@
         </div>
 
         <div class="progress-track">
-          <div class="progress-bar" :style="{ width: progress + '%' }"></div>
+          <div
+            class="progress-bar"
+            :class="{ indeterminate: showIndeterminateProgress }"
+            :style="progressBarStyle"
+          ></div>
         </div>
 
         <div class="status-meta">
@@ -352,6 +356,19 @@ const progress = computed(() => {
   }
   const ratio = status.value.current / status.value.total
   return Math.min(100, Math.max(0, Math.round(ratio * 100)))
+})
+
+const showIndeterminateProgress = computed(() => {
+  return ['PENDING', 'PROGRESS'].includes(status.value.state) && progress.value === 0
+})
+
+const progressBarStyle = computed(() => {
+  if (showIndeterminateProgress.value) {
+    return {}
+  }
+  return {
+    width: `${progress.value}%`
+  }
 })
 
 const statusLabel = computed(() => {
@@ -889,6 +906,23 @@ onBeforeUnmount(() => {
   height: 100%;
   background: linear-gradient(90deg, var(--accent-2), var(--accent-1));
   transition: width 0.4s ease;
+}
+
+.progress-bar.indeterminate {
+  width: 28%;
+  animation: progress-indeterminate 1.4s ease-in-out infinite;
+}
+
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-120%);
+  }
+  50% {
+    transform: translateX(100%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
 }
 
 .status-meta {
