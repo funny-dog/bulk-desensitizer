@@ -7,6 +7,25 @@ class UploadResponse(BaseModel):
     task_id: str
 
 
+class SplitUploadInitRequest(BaseModel):
+    filename: str
+
+
+class SplitUploadInitResponse(BaseModel):
+    upload_id: str
+
+
+class SplitUploadChunkResponse(BaseModel):
+    upload_id: str
+    chunk_index: int
+    total_chunks: int
+    received_bytes: int
+
+
+class SplitUploadCompleteRequest(BaseModel):
+    upload_id: str
+
+
 class TaskStatusResponse(BaseModel):
     task_id: str
     state: str

@@ -60,6 +60,86 @@ def test_upload_split_rejects_unsupported_file_type(tmp_path, monkeypatch):
     assert response.json()["detail"] == "only .pdf or .txt is supported"
 
 
+def test_split_chunk_upload_then_complete_dispatches_task(tmp_path, monkeypatch):
+    upload_dir, _ = _set_temp_dirs(tmp_path, monkeypatch)
+    client = TestClient(app)
+
+    init_response = client.post("/upload/split/init", json={"filename": "large.pdf"})
+    assert init_response.status_code == 200
+    upload_id = init_response.json()["upload_id"]
+
+    chunk0 = client.post(
+        "/upload/split/chunk",
+        files={"file": ("chunk0.bin", b"abc", "application/octet-stream")},
+        data={"upload_id": upload_id, "chunk_index": "0", "total_chunks": "2"},
+    )
+    assert chunk0.status_code == 200
+    assert chunk0.json()["received_bytes"] == 3
+
+    chunk1 = client.post(
+        "/upload/split/chunk",
+        files={"file": ("chunk1.bin", b"def", "application/octet-stream")},
+        data={"upload_id": upload_id, "chunk_index": "1", "total_chunks": "2"},
+    )
+    assert chunk1.status_code == 200
+    assert chunk1.json()["received_bytes"] == 3
+
+    class DummyTask:
+        id = "task-split-chunked"
+
+    with patch("main.process_split_archive.delay", return_value=DummyTask()) as mock_delay:
+        complete_response = client.post(
+            "/upload/split/complete",
+            json={"upload_id": upload_id},
+        )
+
+    assert complete_response.status_code == 200
+    assert complete_response.json() == {"task_id": "task-split-chunked"}
+
+    saved_path = Path(mock_delay.call_args.args[0])
+    assert saved_path.exists()
+    assert saved_path.read_bytes() == b"abcdef"
+    assert saved_path.parent == upload_dir
+
+
+def test_split_chunk_upload_rejects_out_of_order_chunks(tmp_path, monkeypatch):
+    _set_temp_dirs(tmp_path, monkeypatch)
+    client = TestClient(app)
+
+    init_response = client.post("/upload/split/init", json={"filename": "large.txt"})
+    assert init_response.status_code == 200
+    upload_id = init_response.json()["upload_id"]
+
+    chunk_response = client.post(
+        "/upload/split/chunk",
+        files={"file": ("chunk1.bin", b"abc", "application/octet-stream")},
+        data={"upload_id": upload_id, "chunk_index": "1", "total_chunks": "2"},
+    )
+
+    assert chunk_response.status_code == 409
+    assert "expected 0, got 1" in chunk_response.json()["detail"]
+
+
+def test_split_chunk_complete_requires_all_chunks(tmp_path, monkeypatch):
+    _set_temp_dirs(tmp_path, monkeypatch)
+    client = TestClient(app)
+
+    init_response = client.post("/upload/split/init", json={"filename": "large.txt"})
+    assert init_response.status_code == 200
+    upload_id = init_response.json()["upload_id"]
+
+    chunk_response = client.post(
+        "/upload/split/chunk",
+        files={"file": ("chunk0.bin", b"abc", "application/octet-stream")},
+        data={"upload_id": upload_id, "chunk_index": "0", "total_chunks": "2"},
+    )
+    assert chunk_response.status_code == 200
+
+    complete_response = client.post("/upload/split/complete", json={"upload_id": upload_id})
+    assert complete_response.status_code == 400
+    assert complete_response.json()["detail"] == "split upload is not complete"
+
+
 def test_download_uses_task_output_file_from_success_meta(tmp_path, monkeypatch):
     _, output_dir = _set_temp_dirs(tmp_path, monkeypatch)
     client = TestClient(app)

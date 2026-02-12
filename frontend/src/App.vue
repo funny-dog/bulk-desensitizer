@@ -46,6 +46,21 @@
             PDF/TXT 分片
           </button>
         </div>
+        <div class="api-config">
+          <p class="api-title">后端地址（可选）</p>
+          <div class="api-row">
+            <input
+              v-model.trim="apiBaseInput"
+              class="api-input"
+              type="text"
+              placeholder="留空表示同源，例如 https://backend.bulk-desensitizer.orb.local"
+            />
+            <button class="api-btn" :disabled="uploading" @click="saveApiBase">保存</button>
+            <button class="api-btn ghost" :disabled="uploading" @click="clearApiBase">清空</button>
+          </div>
+          <p class="api-current">当前后端：{{ effectiveApiBaseLabel }}</p>
+          <p v-if="apiBaseError" class="api-error">{{ apiBaseError }}</p>
+        </div>
         <label class="file-input">
           <input
             type="file"
@@ -173,14 +188,60 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 
 const configuredApiBase = (import.meta.env.VITE_API_BASE_URL || '').trim()
-const apiBase = configuredApiBase ? configuredApiBase.replace(/\/+$/, '') : ''
+const API_BASE_STORAGE_KEY = 'bulk_desensitizer_api_base'
+const SPLIT_UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024
+
+const normalizeBaseUrl = (value) => {
+  const trimmed = (value || '').trim()
+  if (!trimmed) return ''
+
+  const withProtocol = /^https?:\/\//i.test(trimmed)
+    ? trimmed
+    : `${window.location.protocol}//${trimmed}`
+
+  let parsed
+  try {
+    parsed = new URL(withProtocol)
+  } catch {
+    return ''
+  }
+
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    return ''
+  }
+
+  parsed.search = ''
+  parsed.hash = ''
+  const pathname = parsed.pathname.replace(/\/+$/, '')
+  return `${parsed.origin}${pathname}`
+}
+
+const readApiBaseFromQuery = () => {
+  const params = new URLSearchParams(window.location.search)
+  const raw = params.get('apiBase') || params.get('api_base') || params.get('backend')
+  return normalizeBaseUrl(raw)
+}
+
+const readInitialApiBase = () => {
+  const queryBase = readApiBaseFromQuery()
+  if (queryBase) {
+    window.localStorage.setItem(API_BASE_STORAGE_KEY, queryBase)
+    return queryBase
+  }
+
+  const localBase = normalizeBaseUrl(window.localStorage.getItem(API_BASE_STORAGE_KEY) || '')
+  if (localBase) return localBase
+  return normalizeBaseUrl(configuredApiBase)
+}
 
 const selectedFile = ref(null)
 const fileName = ref('')
 const uploading = ref(false)
 const taskId = ref('')
 const errorMessage = ref('')
+const apiBaseError = ref('')
 const mode = ref('desensitize')
+const apiBaseInput = ref(readInitialApiBase())
 const status = ref({
   state: 'IDLE',
   current: 0,
@@ -189,14 +250,40 @@ const status = ref({
 })
 
 const socket = ref(null)
+const apiBase = computed(() => normalizeBaseUrl(apiBaseInput.value))
+const effectiveApiBaseLabel = computed(() => apiBase.value || '同源（当前访问域名）')
+
+const saveApiBase = () => {
+  const raw = (apiBaseInput.value || '').trim()
+  const normalized = normalizeBaseUrl(raw)
+
+  if (raw && !normalized) {
+    apiBaseError.value = '后端地址格式不正确，请输入完整 URL 或域名。'
+    return
+  }
+
+  apiBaseError.value = ''
+  apiBaseInput.value = normalized
+  if (normalized) {
+    window.localStorage.setItem(API_BASE_STORAGE_KEY, normalized)
+  } else {
+    window.localStorage.removeItem(API_BASE_STORAGE_KEY)
+  }
+}
+
+const clearApiBase = () => {
+  apiBaseError.value = ''
+  apiBaseInput.value = ''
+  window.localStorage.removeItem(API_BASE_STORAGE_KEY)
+}
 
 const buildApiUrl = (path) => {
-  return apiBase ? `${apiBase}${path}` : path
+  return apiBase.value ? `${apiBase.value}${path}` : path
 }
 
 const buildWsUrl = (path) => {
-  if (apiBase) {
-    const wsBase = apiBase.replace(/^http/i, 'ws')
+  if (apiBase.value) {
+    const wsBase = apiBase.value.replace(/^http/i, 'ws')
     return `${wsBase}${path}`
   }
 
@@ -208,9 +295,34 @@ const normalizeErrorMessage = (error) => {
   const message = error?.message || ''
   if (!message) return '发生未知错误'
   if (/failed to fetch/i.test(message)) {
-    return '网络请求失败，请检查服务地址或网络连接。'
+    return apiBase.value
+      ? `网络请求失败，请检查后端地址是否可访问：${apiBase.value}`
+      : '网络请求失败。若前后端不在同一域名，请先填写后端地址。'
   }
   return message
+}
+
+const readErrorMessage = async (response, fallback = '请求失败') => {
+  const contentType = response.headers.get('content-type') || ''
+  if (contentType.includes('application/json')) {
+    try {
+      const data = await response.json()
+      if (typeof data?.detail === 'string' && data.detail) {
+        return data.detail
+      }
+    } catch {
+      // ignore JSON parse errors and fallback to text below.
+    }
+  }
+
+  try {
+    const text = await response.text()
+    if (text) return text
+  } catch {
+    // ignore read errors and fallback.
+  }
+
+  return fallback
 }
 
 const fileAccept = computed(() => {
@@ -292,6 +404,81 @@ const handleFile = (event) => {
   fileName.value = file ? file.name : ''
 }
 
+const uploadSplitFileLegacy = async (file) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  const response = await fetch(buildApiUrl('/upload/split'), {
+    method: 'POST',
+    body: formData
+  })
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, '上传失败'))
+  }
+
+  return response.json()
+}
+
+const uploadSplitFileInChunks = async (file) => {
+  const initResponse = await fetch(buildApiUrl('/upload/split/init'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename: file.name })
+  })
+
+  if (initResponse.status === 404) {
+    return uploadSplitFileLegacy(file)
+  }
+
+  if (!initResponse.ok) {
+    throw new Error(await readErrorMessage(initResponse, '初始化分片上传失败'))
+  }
+
+  const initData = await initResponse.json()
+  const uploadId = initData.upload_id
+  const totalChunks = Math.max(1, Math.ceil(file.size / SPLIT_UPLOAD_CHUNK_BYTES))
+
+  for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+    const start = chunkIndex * SPLIT_UPLOAD_CHUNK_BYTES
+    const end = Math.min(file.size, start + SPLIT_UPLOAD_CHUNK_BYTES)
+    const chunkBlob = file.slice(start, end)
+
+    const formData = new FormData()
+    formData.append('upload_id', uploadId)
+    formData.append('chunk_index', String(chunkIndex))
+    formData.append('total_chunks', String(totalChunks))
+    formData.append('file', chunkBlob, `${file.name}.part${chunkIndex}`)
+
+    const chunkResponse = await fetch(buildApiUrl('/upload/split/chunk'), {
+      method: 'POST',
+      body: formData
+    })
+
+    if (!chunkResponse.ok) {
+      throw new Error(await readErrorMessage(chunkResponse, '分片上传失败'))
+    }
+
+    status.value = {
+      state: 'PROGRESS',
+      current: chunkIndex + 1,
+      total: totalChunks,
+      message: `上传分片 ${chunkIndex + 1}/${totalChunks}`
+    }
+  }
+
+  const completeResponse = await fetch(buildApiUrl('/upload/split/complete'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ upload_id: uploadId })
+  })
+
+  if (!completeResponse.ok) {
+    throw new Error(await readErrorMessage(completeResponse, '完成分片上传失败'))
+  }
+
+  return completeResponse.json()
+}
+
 const uploadFile = async () => {
   if (!selectedFile.value) {
     errorMessage.value =
@@ -305,21 +492,24 @@ const uploadFile = async () => {
   uploading.value = true
 
   try {
-    const formData = new FormData()
-    formData.append('file', selectedFile.value)
-    const endpoint = mode.value === 'split' ? '/upload/split' : '/upload/desensitize'
+    let data
+    if (mode.value === 'split') {
+      data = await uploadSplitFileInChunks(selectedFile.value)
+    } else {
+      const formData = new FormData()
+      formData.append('file', selectedFile.value)
+      const response = await fetch(buildApiUrl('/upload/desensitize'), {
+        method: 'POST',
+        body: formData
+      })
 
-    const response = await fetch(buildApiUrl(endpoint), {
-      method: 'POST',
-      body: formData
-    })
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response, '上传失败'))
+      }
 
-    if (!response.ok) {
-      const message = await response.text()
-      throw new Error(message || '上传失败')
+      data = await response.json()
     }
 
-    const data = await response.json()
     taskId.value = data.task_id
     status.value = {
       state: 'PENDING',
@@ -547,6 +737,66 @@ onBeforeUnmount(() => {
   border-color: var(--accent-1);
 }
 
+.api-config {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--stroke);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.api-title {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--ink-2);
+}
+
+.api-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+}
+
+.api-input {
+  border: 1px solid var(--stroke);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.88rem;
+  min-width: 0;
+}
+
+.api-btn {
+  border: 1px solid var(--stroke);
+  border-radius: 8px;
+  background: white;
+  padding: 8px 10px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.api-btn.ghost {
+  color: var(--ink-2);
+}
+
+.api-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.api-current {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 0.82rem;
+}
+
+.api-error {
+  margin: 0;
+  color: #b91c1c;
+  font-size: 0.82rem;
+}
+
 .file-input {
   display: inline-flex;
   align-items: center;
@@ -672,6 +922,12 @@ onBeforeUnmount(() => {
   }
 
   .panel {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .api-row {
     grid-template-columns: 1fr;
   }
 }
